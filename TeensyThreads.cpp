@@ -140,7 +140,12 @@ Threads::Threads() : current_thread(0), thread_count(0), thread_error(0) {
 
   // commandeer the SVCall & SysTick Exceptions
   save_svcall_isr = _VectorsRam[11];
-  if (save_svcall_isr == unused_isr) save_svcall_isr = 0;
+  #if defined(__IMXRT1062__)
+	//if (save_svcall_isr == unused_isr) save_svcall_isr = 0;
+	save_svcall_isr = 0;
+  #else
+	if (save_svcall_isr == unused_isr) save_svcall_isr = 0;
+  #endif
   _VectorsRam[11] = threads_svcall_isr;
   save_systick_isr = _VectorsRam[15];
   _VectorsRam[15] = threads_systick_isr;
@@ -246,6 +251,39 @@ extern "C" void context_switch_pit_isr();
  * Implementation strategy suggested by @tni in Teensy Forums; see
  * https://forum.pjrc.com/threads/41504-Teensy-3-x-multithreading-library-first-release
  */
+#if defined(__IMXRT1062__)
+int Threads::setMicroTimer(int tick_microseconds)
+{
+  // lowest priority so we don't interrupt other interrupts
+  context_timer.priority(255);
+  // start timer with dummy fuction
+  if (context_timer.begin(context_pit_empty, tick_microseconds) == 0) {
+    // failed to set the timer!
+    return 0;
+  }
+  currentUseSystick = 0; // disable Systick calls
+  // get the PIT number [0-3] (IntervalTimer overrides IRQ_NUMBER_t op)
+  for (int i = 0; i < 4; i++)
+  {
+    if (IMXRT_PIT_CHANNELS[i].TFLG == 0) 
+    {
+		int number = i;
+		  Serial.print("i: "); Serial.println(i);
+
+  //int number = (IRQ_NUMBER_t)context_timer - i;
+  // calculate number of uint32_t per PIT; should be 4.
+  // Not hard-coded in case this changes in future CPUs.
+  const int width = (PIT_TFLG1 - PIT_TFLG0) / 4;
+  Serial.print("Width: "); Serial.println(width);
+  // get the right flag to ackowledge PIT interrupt
+  context_timer_flag = &PIT_TFLG0 + (width * number);
+  attachInterruptVector(context_timer, context_switch_pit_isr);
+  return 1;
+	}
+  }
+	return 0;
+}
+#else
 int Threads::setMicroTimer(int tick_microseconds)
 {
   // lowest priority so we don't interrupt other interrupts
@@ -266,7 +304,7 @@ int Threads::setMicroTimer(int tick_microseconds)
   attachInterruptVector(context_timer, context_switch_pit_isr);
   return 1;
 }
-
+#endif
 /*
  * Set each time slice to be 'microseconds' long
  */
